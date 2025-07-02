@@ -112,7 +112,6 @@ export function usePlayer() {
             playFromTime(dropAnalysis.dropStart);
             setPlayerState(prev => ({ ...prev, isPlaying: true }));
             startProgressTracking(dropAnalysis.dropStart);
-            scheduleNextTrack();
           },
           (event) => {
             handlePlayerStateChange(event);
@@ -142,7 +141,6 @@ export function usePlayer() {
       setPlayerState(prev => ({ ...prev, isPlaying: true }));
       if (playerState.dropAnalysis) {
         startProgressTracking(playerState.dropAnalysis.dropStart);
-        scheduleNextTrack();
       }
     } else if (state === YT_PLAYER_STATES.PAUSED) {
       setPlayerState(prev => ({ ...prev, isPlaying: false }));
@@ -189,19 +187,6 @@ export function usePlayer() {
       progressInterval.current = null;
     }
   }, []);
-
-  const scheduleNextTrack = useCallback(() => {
-    if (previewTimeout.current) {
-      clearTimeout(previewTimeout.current);
-    }
-    
-    console.log('Scheduling next track in', playerState.previewLength, 'ms');
-    
-    previewTimeout.current = setTimeout(() => {
-      console.log('Preview time elapsed, moving to next track');
-      nextTrack();
-    }, playerState.previewLength);
-  }, [playerState.previewLength]);
 
   const play = useCallback(() => {
     console.log('Play button pressed');
