@@ -62,6 +62,11 @@ export interface AudioAnalysis {
     pitches: number[];
     timbre: number[];
   }>;
+  bars: Array<{
+    start: number;
+    duration: number;
+    confidence: number;
+  }>;
 }
 
 export interface DropAnalysis {

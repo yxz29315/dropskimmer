@@ -8,7 +8,7 @@ import { spotifyApiCall } from './spotify';
  * 1. **Dynamic loudness threshold** – adapts to track master level.
  * 2. **Beat‑snap** – aligns chosen drop to the nearest confident bar down‑beat.
  * 3. **Energy‑dip heuristic** – looks for quiet‑>loud transition just before the hit.
- * 4. Same public API + caching, so it’s a drop‑in replacement.
+ * 4. Same public API + caching, so it's a drop‑in replacement.
  */
 
 export async function detectDrop(
@@ -18,9 +18,9 @@ export async function detectDrop(
 ): Promise<DropAnalysis> {
   try {
     console.log('Detecting drop for track:', track.name);
-
+    const cacheKey = getCacheKey(track.id, loudnessOffset, previewLength);
     // ────────────────────────────────── CACHE ───────────────────────────────────
-    const cached = await getCachedAnalysis(track.id);
+    const cached = await getCachedAnalysis(track.id, loudnessOffset, previewLength);
     if (cached && Date.now() - cached.analysisTimestamp < 7 * 24 * 60 * 60 * 1000) {
       console.log('Using cached analysis for:', track.name);
       return cached;
@@ -33,7 +33,7 @@ export async function detectDrop(
     const dropAnalysis = analyzeForDrop(track, analysis, loudnessOffset, previewLength);
     console.log('Drop analysis result:', dropAnalysis);
 
-    await cacheAnalysis(dropAnalysis);
+    await cacheAnalysis({ ...dropAnalysis, cacheKey });
     return dropAnalysis;
   } catch (err) {
     console.error('Drop detection failed, using fallback:', err);
@@ -203,6 +203,10 @@ const DB_NAME = 'SpotifyDropAnalysisDB';
 const DB_VERSION = 1;
 const STORE_NAME = 'dropAnalysis';
 
+function getCacheKey(trackId: string, loudnessOffset: number, previewLength: number): string {
+  return `${trackId}|${loudnessOffset}|${previewLength}`;
+}
+
 function openDB(): Promise<IDBDatabase> {
   return new Promise((res, rej) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -211,18 +215,19 @@ function openDB(): Promise<IDBDatabase> {
     req.onupgradeneeded = e => {
       const db = (e.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const st = db.createObjectStore(STORE_NAME, { keyPath: 'trackId' });
+        const st = db.createObjectStore(STORE_NAME, { keyPath: 'cacheKey' });
         st.createIndex('timestamp', 'analysisTimestamp');
       }
     };
   });
 }
 
-async function getCachedAnalysis(trackId: string): Promise<DropAnalysis | null> {
+async function getCachedAnalysis(trackId: string, loudnessOffset: number, previewLength: number): Promise<DropAnalysis | null> {
   try {
     const db = await openDB();
     const tx = db.transaction(STORE_NAME, 'readonly');
-    const req = tx.objectStore(STORE_NAME).get(trackId);
+    const cacheKey = getCacheKey(trackId, loudnessOffset, previewLength);
+    const req = tx.objectStore(STORE_NAME).get(cacheKey);
     return await new Promise((res, rej) => {
       req.onerror = () => rej(req.error);
       req.onsuccess = () => res(req.result || null);
@@ -233,7 +238,7 @@ async function getCachedAnalysis(trackId: string): Promise<DropAnalysis | null> 
   }
 }
 
-async function cacheAnalysis(a: DropAnalysis): Promise<void> {
+async function cacheAnalysis(a: DropAnalysis & { cacheKey: string }): Promise<void> {
   try {
     const db = await openDB();
     const tx = db.transaction(STORE_NAME, 'readwrite');
