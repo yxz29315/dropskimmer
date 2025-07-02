@@ -21,7 +21,7 @@ export function usePlayer() {
     queue: [],
     progress: 0,
     previewLength: 20000, // 20 seconds default
-    loudnessThreshold: -10,
+    loudnessThreshold: 3, // default 3 dB above median
     dropAnalysis: null,
   });
 

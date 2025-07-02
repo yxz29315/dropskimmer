@@ -242,15 +242,15 @@ export function Player({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Volume2 className="w-4 h-4 text-gray-400" />
-              <span className="text-sm text-gray-300">Drop Sensitivity</span>
+              <span className="text-sm text-gray-300">Drop Threshold Offset (dB above median)</span>
             </div>
-            <span className="text-sm text-[#1DB954] font-medium">{loudnessThreshold}dB</span>
+            <span className="text-sm text-[#1DB954] font-medium">{loudnessThreshold} dB</span>
           </div>
           <input
             type="range"
-            min="-30"
-            max="0"
-            step="2"
+            min="0"
+            max="10"
+            step="1"
             value={loudnessThreshold}
             onChange={(e) => onLoudnessThresholdChange(parseInt(e.target.value))}
             className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
