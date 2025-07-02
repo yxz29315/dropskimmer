@@ -37,7 +37,7 @@ export async function detectDrop(
     return dropAnalysis;
   } catch (err) {
     console.error('Drop detection failed, using fallback:', err);
-    return fallbackDrop(track, previewLength, 0.25, 'error');
+    return fallbackDrop(track, previewLength, 0.75, 'error');
   }
 }
 
@@ -103,7 +103,7 @@ function buildResult(
 function fallbackDrop(track: SpotifyTrack, previewLength: number, confidence: number, method: string): DropAnalysis {
   return {
     trackId: track.id,
-    dropStart: Math.floor(track.duration_ms * 0.3),
+    dropStart: Math.floor(track.duration_ms * 0.25),
     confidence,
     method,
     previewLength,
