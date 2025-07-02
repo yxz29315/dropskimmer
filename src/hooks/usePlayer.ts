@@ -50,6 +50,65 @@ export function usePlayer() {
     }));
   }, []);
 
+  const stopProgressTracking = useCallback(() => {
+    if (progressInterval.current) {
+      clearInterval(progressInterval.current);
+      progressInterval.current = null;
+    }
+  }, []);
+
+  const nextTrack = useCallback(() => {
+    console.log('Moving to next track');
+    const nextIndex = playerState.currentTrackIndex + 1;
+    if (nextIndex < playerState.queue.length) {
+      const nextTrack = playerState.queue[nextIndex];
+      playTrack(nextTrack, nextIndex);
+    } else {
+      // End of queue
+      console.log('End of queue reached');
+      setPlayerState(prev => ({
+        ...prev,
+        isPlaying: false,
+        progress: 0,
+      }));
+      stopProgressTracking();
+      if (previewTimeout.current) {
+        clearTimeout(previewTimeout.current);
+        previewTimeout.current = null;
+      }
+    }
+  }, [playerState.currentTrackIndex, playerState.queue, stopProgressTracking]);
+
+  const startProgressTracking = useCallback((dropStart: number) => {
+    stopProgressTracking();
+    console.log('Starting progress tracking from drop start:', dropStart);
+    progressInterval.current = setInterval(() => {
+      let currentTime = 0;
+      if (youtubePlayer && getPlayerState() === YT_PLAYER_STATES.PLAYING) {
+        currentTime = getCurrentTime(); // in ms
+        // Fallback: use youtubePlayer.getCurrentTime() if getCurrentTime() returns 0
+        if (!currentTime && youtubePlayer.getCurrentTime) {
+          currentTime = youtubePlayer.getCurrentTime() * 1000;
+        }
+        const progress = Math.max(0, currentTime - dropStart);
+        console.log('[ProgressTracking] currentTime:', currentTime, 'progress:', progress, 'playerState:', getPlayerState());
+        setPlayerState(prev => ({
+          ...prev,
+          progress: progress,
+        }));
+        // Check if we've reached the end of our preview
+        if (progress >= playerState.previewLength) {
+          console.log('Preview length reached, moving to next track');
+          nextTrack();
+        }
+      } else {
+        // Not playing, do not update progress
+        // Optionally, log for debugging
+        // console.log('[ProgressTracking] Not playing or player not ready');
+      }
+    }, 500);
+  }, [youtubePlayer, playerState.previewLength, nextTrack, stopProgressTracking]);
+
   const playTrack = useCallback(async (track: SpotifyTrack, index: number) => {
     try {
       console.log('=== Playing track ===');
@@ -131,7 +190,7 @@ export function usePlayer() {
       // Try next track after a short delay
       setTimeout(() => nextTrack(), 2000);
     }
-  }, [playerState.previewLength, youtubePlayer, isYouTubeReady]);
+  }, [playerState.previewLength, youtubePlayer, isYouTubeReady, nextTrack, startProgressTracking]);
 
   const handlePlayerStateChange = useCallback((event: any) => {
     const state = event.data;
@@ -155,44 +214,7 @@ export function usePlayer() {
     } else if (state === YT_PLAYER_STATES.BUFFERING) {
       console.log('Video buffering...');
     }
-  }, [playerState.dropAnalysis]);
-
-  const startProgressTracking = useCallback((dropStart: number) => {
-    stopProgressTracking();
-    console.log('Starting progress tracking from drop start:', dropStart);
-    progressInterval.current = setInterval(() => {
-      let currentTime = 0;
-      if (youtubePlayer && getPlayerState() === YT_PLAYER_STATES.PLAYING) {
-        currentTime = getCurrentTime(); // in ms
-        // Fallback: use youtubePlayer.getCurrentTime() if getCurrentTime() returns 0
-        if (!currentTime && youtubePlayer.getCurrentTime) {
-          currentTime = youtubePlayer.getCurrentTime() * 1000;
-        }
-        const progress = Math.max(0, currentTime - dropStart);
-        console.log('[ProgressTracking] currentTime:', currentTime, 'progress:', progress, 'playerState:', getPlayerState());
-        setPlayerState(prev => ({
-          ...prev,
-          progress: progress,
-        }));
-        // Check if we've reached the end of our preview
-        if (progress >= playerState.previewLength) {
-          console.log('Preview length reached, moving to next track');
-          nextTrack();
-        }
-      } else {
-        // Not playing, do not update progress
-        // Optionally, log for debugging
-        // console.log('[ProgressTracking] Not playing or player not ready');
-      }
-    }, 500);
-  }, [youtubePlayer, playerState.previewLength, nextTrack]);
-
-  const stopProgressTracking = useCallback(() => {
-    if (progressInterval.current) {
-      clearInterval(progressInterval.current);
-      progressInterval.current = null;
-    }
-  }, []);
+  }, [playerState.dropAnalysis, startProgressTracking, stopProgressTracking, nextTrack]);
 
   const play = useCallback(() => {
     console.log('Play button pressed');
@@ -214,28 +236,6 @@ export function usePlayer() {
       previewTimeout.current = null;
     }
   }, [youtubePlayer]);
-
-  const nextTrack = useCallback(() => {
-    console.log('Moving to next track');
-    const nextIndex = playerState.currentTrackIndex + 1;
-    if (nextIndex < playerState.queue.length) {
-      const nextTrack = playerState.queue[nextIndex];
-      playTrack(nextTrack, nextIndex);
-    } else {
-      // End of queue
-      console.log('End of queue reached');
-      setPlayerState(prev => ({
-        ...prev,
-        isPlaying: false,
-        progress: 0,
-      }));
-      stopProgressTracking();
-      if (previewTimeout.current) {
-        clearTimeout(previewTimeout.current);
-        previewTimeout.current = null;
-      }
-    }
-  }, [playerState.currentTrackIndex, playerState.queue, playTrack, stopProgressTracking]);
 
   const previousTrack = useCallback(() => {
     console.log('Moving to previous track');
