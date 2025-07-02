@@ -159,27 +159,33 @@ export function usePlayer() {
 
   const startProgressTracking = useCallback((dropStart: number) => {
     stopProgressTracking();
-    
     console.log('Starting progress tracking from drop start:', dropStart);
-    
     progressInterval.current = setInterval(() => {
+      let currentTime = 0;
       if (youtubePlayer && getPlayerState() === YT_PLAYER_STATES.PLAYING) {
-        const currentTime = getCurrentTime(); // in ms
+        currentTime = getCurrentTime(); // in ms
+        // Fallback: use youtubePlayer.getCurrentTime() if getCurrentTime() returns 0
+        if (!currentTime && youtubePlayer.getCurrentTime) {
+          currentTime = youtubePlayer.getCurrentTime() * 1000;
+        }
         const progress = Math.max(0, currentTime - dropStart);
-        
+        console.log('[ProgressTracking] currentTime:', currentTime, 'progress:', progress, 'playerState:', getPlayerState());
         setPlayerState(prev => ({
           ...prev,
           progress: progress,
         }));
-        
         // Check if we've reached the end of our preview
         if (progress >= playerState.previewLength) {
           console.log('Preview length reached, moving to next track');
           nextTrack();
         }
+      } else {
+        // Not playing, do not update progress
+        // Optionally, log for debugging
+        // console.log('[ProgressTracking] Not playing or player not ready');
       }
     }, 500);
-  }, [youtubePlayer, playerState.previewLength]);
+  }, [youtubePlayer, playerState.previewLength, nextTrack]);
 
   const stopProgressTracking = useCallback(() => {
     if (progressInterval.current) {
