@@ -45,46 +45,27 @@ export async function searchYouTubeVideo(artist: string, title: string): Promise
     const cleanArtist = artist.replace(/[^\w\s]/gi, ' ').replace(/\s+/g, ' ').trim();
     const cleanTitle = title.replace(/[^\w\s]/gi, ' ').replace(/\s+/g, ' ').trim();
     const query = `${cleanArtist} ${cleanTitle}`;
-    
+
     console.log('Searching YouTube for:', query);
-    
-    // Use YouTube's search via their website (this is a workaround since we don't have API key)
-    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
-    
-    try {
-      // Try to fetch the search results page
-      const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(searchUrl)}`);
-      const data = await response.json();
-      
-      if (data.contents) {
-        // Extract video IDs from the HTML
-        const videoIds = extractVideoIds(data.contents);
-        if (videoIds.length > 0) {
-          console.log('Found video ID:', videoIds[0]);
-          return videoIds[0];
-        }
-      }
-    } catch (error) {
-      console.warn('CORS proxy failed, trying alternative method:', error);
+
+    // Use YouTube Data API v3
+    const apiKey = import.meta.env.VITE_YOUTUBE_API_KEY;
+    if (!apiKey) {
+      throw new Error('YouTube API key not configured');
     }
-    
-    // Fallback: try a different approach using YouTube's oEmbed
-    try {
-      const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${await searchViaOEmbed(query)}&format=json`;
-      const response = await fetch(oembedUrl);
-      if (response.ok) {
-        const data = await response.json();
-        if (data.video_id) {
-          return data.video_id;
-        }
-      }
-    } catch (error) {
-      console.warn('oEmbed search failed:', error);
+    const apiUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=1&q=${encodeURIComponent(query)}&key=${apiKey}`;
+    const response = await fetch(apiUrl);
+    if (!response.ok) {
+      throw new Error('YouTube API request failed');
     }
-    
-    // Last resort: use a more targeted search approach
-    return await searchViaAlternativeMethod(cleanArtist, cleanTitle);
-    
+    const data = await response.json();
+    if (data.items && data.items.length > 0) {
+      const videoId = data.items[0].id.videoId;
+      console.log('Found video ID:', videoId);
+      return videoId;
+    }
+    // No video found
+    return null;
   } catch (error) {
     console.error('YouTube search failed:', error);
     return null;
