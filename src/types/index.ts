@@ -85,6 +85,5 @@ export interface PlayerState {
   queue: SpotifyTrack[];
   progress: number;
   previewLength: number;
-  loudnessThreshold: number;
   dropAnalysis: DropAnalysis | null;
 }

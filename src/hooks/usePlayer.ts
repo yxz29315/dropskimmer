@@ -21,7 +21,6 @@ export function usePlayer() {
     queue: [],
     progress: 0,
     previewLength: 20000, // 20 seconds default
-    loudnessThreshold: 3, // default 3 dB above median
     dropAnalysis: null,
   });
 
@@ -80,7 +79,7 @@ export function usePlayer() {
 
       // Detect drop point using Spotify's Audio Analysis
       console.log('Detecting drop for track...');
-      const dropAnalysis = await detectDrop(track, playerState.loudnessThreshold, playerState.previewLength);
+      const dropAnalysis = await detectDrop(track, 3, playerState.previewLength);
       console.log('Drop detected:', dropAnalysis);
       
       setPlayerState(prev => ({
@@ -133,7 +132,7 @@ export function usePlayer() {
       // Try next track after a short delay
       setTimeout(() => nextTrack(), 2000);
     }
-  }, [playerState.loudnessThreshold, playerState.previewLength, youtubePlayer, isYouTubeReady]);
+  }, [playerState.previewLength, youtubePlayer, isYouTubeReady]);
 
   const handlePlayerStateChange = useCallback((event: any) => {
     const state = event.data;
@@ -264,14 +263,6 @@ export function usePlayer() {
     }));
   }, []);
 
-  const setLoudnessThreshold = useCallback((threshold: number) => {
-    console.log('Setting loudness threshold to:', threshold);
-    setPlayerState(prev => ({
-      ...prev,
-      loudnessThreshold: threshold,
-    }));
-  }, []);
-
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -295,13 +286,13 @@ export function usePlayer() {
     }
   }, [playerState.queue, playerState.currentTrack, isYouTubeReady, playTrack]);
 
-  // Live update drop point and playback when loudnessThreshold or previewLength changes
+  // Live update drop point and playback when previewLength changes
   useEffect(() => {
     async function updateDropLive() {
       if (playerState.currentTrack) {
         const dropAnalysis = await detectDrop(
           playerState.currentTrack,
-          playerState.loudnessThreshold,
+          3,
           playerState.previewLength
         );
         setPlayerState(prev => ({
@@ -316,7 +307,7 @@ export function usePlayer() {
     }
     updateDropLive();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playerState.loudnessThreshold, playerState.previewLength]);
+  }, [playerState.previewLength]);
 
   return {
     playerState,
@@ -326,7 +317,6 @@ export function usePlayer() {
     nextTrack,
     previousTrack,
     setPreviewLength,
-    setLoudnessThreshold,
     playTrack,
   };
 }

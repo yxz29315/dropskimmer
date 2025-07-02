@@ -20,7 +20,6 @@ interface PlayerProps {
   onNext: () => void;
   onPrevious: () => void;
   onPreviewLengthChange: (length: number) => void;
-  onLoudnessThresholdChange: (threshold: number) => void;
 }
 
 export function Player({
@@ -30,14 +29,12 @@ export function Player({
   onNext,
   onPrevious,
   onPreviewLengthChange,
-  onLoudnessThresholdChange,
 }: PlayerProps) {
   const { 
     isPlaying, 
     currentTrack, 
     progress, 
     previewLength, 
-    loudnessThreshold,
     dropAnalysis,
     currentTrackIndex,
     queue
@@ -234,30 +231,6 @@ export function Player({
           <div className="flex justify-between text-xs text-gray-500">
             <span>10s</span>
             <span>45s</span>
-          </div>
-        </div>
-
-        {/* Loudness Threshold Slider */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Volume2 className="w-4 h-4 text-gray-400" />
-              <span className="text-sm text-gray-300">Drop Threshold Offset (dB above median)</span>
-            </div>
-            <span className="text-sm text-[#1DB954] font-medium">{loudnessThreshold} dB</span>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="10"
-            step="1"
-            value={loudnessThreshold}
-            onChange={(e) => onLoudnessThresholdChange(parseInt(e.target.value))}
-            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
-          />
-          <div className="flex justify-between text-xs text-gray-500">
-            <span>Less Sensitive</span>
-            <span>More Sensitive</span>
           </div>
         </div>
       </div>
