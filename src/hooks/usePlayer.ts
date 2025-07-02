@@ -295,6 +295,29 @@ export function usePlayer() {
     }
   }, [playerState.queue, playerState.currentTrack, isYouTubeReady, playTrack]);
 
+  // Live update drop point and playback when loudnessThreshold or previewLength changes
+  useEffect(() => {
+    async function updateDropLive() {
+      if (playerState.currentTrack) {
+        const dropAnalysis = await detectDrop(
+          playerState.currentTrack,
+          playerState.loudnessThreshold,
+          playerState.previewLength
+        );
+        setPlayerState(prev => ({
+          ...prev,
+          dropAnalysis,
+        }));
+        // If currently playing, jump to new drop point
+        if (playerState.isPlaying && youtubePlayer) {
+          playFromTime(dropAnalysis.dropStart);
+        }
+      }
+    }
+    updateDropLive();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerState.loudnessThreshold, playerState.previewLength]);
+
   return {
     playerState,
     setQueue,
