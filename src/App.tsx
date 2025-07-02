@@ -139,7 +139,7 @@ function App() {
                   <Music className="w-8 h-8 text-[#1DB954] mb-4" />
                   <h3 className="text-white font-semibold mb-2">Smart Detection</h3>
                   <p className="text-gray-400 text-sm">
-                    AI-powered analysis finds the perfect drop point in each track using Spotify's audio data
+                    Algorithmic analysis finds the perfect drop point in each track using Spotify's audio data
                   </p>
                 </motion.div>
                 
