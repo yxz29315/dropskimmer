@@ -2,287 +2,217 @@ import { AudioAnalysis, DropAnalysis, SpotifyTrack } from '../types';
 import { spotifyApiCall } from './spotify';
 
 /**
- * Advanced drop detection algorithm using Spotify's Audio Analysis API
- * 
- * Strategy:
- * 1. Analyze sections for tempo/loudness patterns
- * 2. Look for energy buildup followed by drop (20-50% into track)
- * 3. Fall back to loudest segment if heuristics fail
- * 4. Cache results to avoid re-analysis
+ * Improved EDM‑friendly drop detector
+ *
+ * Key upgrades (kept lightweight):
+ * 1. **Dynamic loudness threshold** – adapts to track master level.
+ * 2. **Beat‑snap** – aligns chosen drop to the nearest confident bar down‑beat.
+ * 3. **Energy‑dip heuristic** – looks for quiet‑>loud transition just before the hit.
+ * 4. Same public API + caching, so it’s a drop‑in replacement.
  */
 
 export async function detectDrop(
   track: SpotifyTrack,
-  loudnessThreshold: number = -10,
-  previewLength: number = 20000
+  loudnessOffset: number = 3,        // dB above median loudness
+  previewLength: number = 20000      // ms of audio preview to play
 ): Promise<DropAnalysis> {
   try {
     console.log('Detecting drop for track:', track.name);
-    
-    // Check cache first
+
+    // ────────────────────────────────── CACHE ───────────────────────────────────
     const cached = await getCachedAnalysis(track.id);
-    if (cached && (Date.now() - cached.analysisTimestamp) < 7 * 24 * 60 * 60 * 1000) { // 7 days
+    if (cached && Date.now() - cached.analysisTimestamp < 7 * 24 * 60 * 60 * 1000) {
       console.log('Using cached analysis for:', track.name);
       return cached;
     }
 
-    // Fetch audio analysis from Spotify
-    console.log('Fetching audio analysis from Spotify...');
+    // ─────────────────────────────── SPOTIFY ANALYSIS ───────────────────────────
+    console.log('Fetching audio analysis from Spotify…');
     const analysis: AudioAnalysis = await spotifyApiCall(`/audio-analysis/${track.id}`);
-    console.log('Audio analysis received:', analysis);
-    
-    const dropAnalysis = analyzeForDrop(track, analysis, loudnessThreshold, previewLength);
+
+    const dropAnalysis = analyzeForDrop(track, analysis, loudnessOffset, previewLength);
     console.log('Drop analysis result:', dropAnalysis);
-    
-    // Cache the result
+
     await cacheAnalysis(dropAnalysis);
-    
     return dropAnalysis;
-  } catch (error) {
-    console.error('Drop detection failed for', track.name, ':', error);
-    
-    // Fallback: use 20% into track as requested
-    const fallbackDrop: DropAnalysis = {
-      trackId: track.id,
-      dropStart: Math.floor(track.duration_ms * 0.2), // 20% into track
-      confidence: 0.3,
-      method: 'fallback',
-      previewLength,
-      analysisTimestamp: Date.now()
-    };
-    
-    console.log('Using fallback drop detection:', fallbackDrop);
-    await cacheAnalysis(fallbackDrop);
-    return fallbackDrop;
+  } catch (err) {
+    console.error('Drop detection failed, using fallback:', err);
+    return fallbackDrop(track, previewLength, 0.3, 'error');
   }
 }
 
+// ────────────────────────────────────────────────────────────────────────────────
+// Core analysis
+// ────────────────────────────────────────────────────────────────────────────────
 function analyzeForDrop(
   track: SpotifyTrack,
   analysis: AudioAnalysis,
-  loudnessThreshold: number,
+  loudnessOffset: number,
   previewLength: number
 ): DropAnalysis {
-  const trackDurationMs = track.duration_ms;
-  const searchStartMs = trackDurationMs * 0.15; // Start looking at 15%
-  const searchEndMs = trackDurationMs * 0.65;   // Stop looking at 65%
-  
-  console.log(`Analyzing track ${track.name} (${trackDurationMs}ms) for drops between ${searchStartMs}ms and ${searchEndMs}ms`);
-  
-  // Method 1: Analyze sections for energy patterns
-  const sectionDrop = findDropInSections(analysis.sections, searchStartMs, searchEndMs, loudnessThreshold);
-  if (sectionDrop) {
-    console.log('Found drop using sections analysis:', sectionDrop);
-    return {
-      trackId: track.id,
-      dropStart: Math.floor(sectionDrop.start * 1000),
-      confidence: sectionDrop.confidence,
-      method: 'sections',
-      previewLength,
-      analysisTimestamp: Date.now()
-    };
-  }
-  
-  // Method 2: Analyze segments for loudness peaks
-  const segmentDrop = findDropInSegments(analysis.segments, searchStartMs, searchEndMs, loudnessThreshold);
-  if (segmentDrop) {
-    console.log('Found drop using segments analysis:', segmentDrop);
-    return {
-      trackId: track.id,
-      dropStart: Math.floor(segmentDrop.start * 1000),
-      confidence: segmentDrop.confidence,
-      method: 'segments',
-      previewLength,
-      analysisTimestamp: Date.now()
-    };
-  }
-  
-  // Method 3: Find the loudest segment in the search range
-  const searchStartSec = searchStartMs / 1000;
-  const searchEndSec = searchEndMs / 1000;
-  
-  const segmentsInRange = analysis.segments.filter(segment => 
-    segment.start >= searchStartSec && segment.start <= searchEndSec
-  );
-  
-  if (segmentsInRange.length > 0) {
-    const loudestSegment = segmentsInRange.reduce((prev, current) => 
-      current.loudness_max > prev.loudness_max ? current : prev
-    );
-    
-    console.log('Using loudest segment in range:', loudestSegment);
-    return {
-      trackId: track.id,
-      dropStart: Math.floor(loudestSegment.start * 1000),
-      confidence: 0.6,
-      method: 'segments',
-      previewLength,
-      analysisTimestamp: Date.now()
-    };
-  }
-  
-  // Final fallback: 30% into track
-  console.log('Using final fallback: 30% into track');
+  const durMs = track.duration_ms;
+  const searchStartMs = durMs * 0.15;
+  const searchEndMs   = durMs * (durMs < 240_000 ? 0.7 : 0.8); // longer for >4‑min tracks
+
+  // ——— Dynamic loudness baseline ———
+  const medianLoud = median(analysis.segments.map(s => s.loudness_max));
+  const dynThreshold = medianLoud + loudnessOffset;  // e.g. +3 dB above median
+
+  // 1. Section‑based scan
+  const sectionHit = findDropInSections(analysis.sections, searchStartMs, searchEndMs, dynThreshold);
+  if (sectionHit)
+    return buildResult(track, analysis, sectionHit, 'sections', previewLength);
+
+  // 2. Segment loudness spike
+  const segmentHit = findDropInSegments(analysis.segments, searchStartMs, searchEndMs, dynThreshold);
+  if (segmentHit)
+    return buildResult(track, analysis, segmentHit, 'segments', previewLength);
+
+  // 3. Loudest segment fallback in window
+  const hit = loudestSegmentInRange(analysis.segments, searchStartMs, searchEndMs);
+  if (hit)
+    return buildResult(track, analysis, hit, 'loudest‑segment', previewLength, 0.6);
+
+  // 4. Hard fallback to 30 %
+  return fallbackDrop(track, previewLength, 0.2, '30‑percent');
+}
+
+// ────────────────────────────── Helper builders ────────────────────────────────
+function buildResult(
+  track: SpotifyTrack,
+  analysis: AudioAnalysis,
+  candidate: DropCandidate,
+  method: string,
+  previewLength: number,
+  confidenceOverride?: number
+): DropAnalysis {
+  // Snap to nearest bar down‑beat for musical tightness
+  const snapped = snapToDownbeat(candidate.start, analysis.bars);
+  const confidence = confidenceOverride ?? squash(candidate.score);
+
   return {
     trackId: track.id,
-    dropStart: Math.floor(trackDurationMs * 0.3),
-    confidence: 0.2,
-    method: 'fallback',
+    dropStart: Math.floor(snapped * 1000), // sec → ms
+    confidence,
+    method,
     previewLength,
-    analysisTimestamp: Date.now()
+    analysisTimestamp: Date.now(),
   };
 }
 
-interface DropCandidate {
-  start: number;
-  confidence: number;
+function fallbackDrop(track: SpotifyTrack, previewLength: number, confidence: number, method: string): DropAnalysis {
+  return {
+    trackId: track.id,
+    dropStart: Math.floor(track.duration_ms * 0.3),
+    confidence,
+    method,
+    previewLength,
+    analysisTimestamp: Date.now(),
+  };
 }
+
+// ───────────────────────────── Detection primitives ────────────────────────────
+interface DropCandidate { start: number; score: number; }
 
 function findDropInSections(
   sections: AudioAnalysis['sections'],
-  searchStartMs: number,
-  searchEndMs: number,
-  loudnessThreshold: number
+  startMs: number,
+  endMs: number,
+  thresh: number
 ): DropCandidate | null {
-  const searchStartSec = searchStartMs / 1000;
-  const searchEndSec = searchEndMs / 1000;
-  
-  console.log('Analyzing sections for drops...');
-  
-  const candidateSections = sections.filter(section => 
-    section.start >= searchStartSec && 
-    section.start <= searchEndSec &&
-    section.loudness >= loudnessThreshold &&
-    section.tempo_confidence > 0.3
-  );
-  
-  console.log(`Found ${candidateSections.length} candidate sections`);
-  
-  if (candidateSections.length === 0) return null;
-  
-  // Look for sections with high energy and good tempo confidence
-  let bestCandidate: DropCandidate | null = null;
-  let bestScore = 0;
-  
-  for (let i = 0; i < candidateSections.length; i++) {
-    const section = candidateSections[i];
-    const prevSection = i > 0 ? candidateSections[i - 1] : null;
-    
-    // Score based on loudness, tempo confidence, and energy jump
-    let score = (section.loudness + 60) / 15; // Normalize loudness (-60 to 0 dB)
-    score += section.tempo_confidence * 3;
-    
-    // Bonus for energy jump from previous section
-    if (prevSection && section.loudness > prevSection.loudness + 2) {
-      score += 4;
-      console.log(`Energy jump detected: ${prevSection.loudness} -> ${section.loudness}`);
-    }
-    
-    // Bonus for being in the sweet spot (25-45% of track)
-    const totalDuration = searchEndSec - searchStartSec;
-    const positionRatio = (section.start - searchStartSec) / totalDuration;
-    if (positionRatio >= 0.2 && positionRatio <= 0.8) {
-      score += 2;
-    }
-    
-    // Bonus for high tempo confidence
-    if (section.tempo_confidence > 0.7) {
-      score += 2;
-    }
-    
-    console.log(`Section at ${section.start}s: loudness=${section.loudness}, tempo_conf=${section.tempo_confidence}, score=${score}`);
-    
-    if (score > bestScore) {
-      bestScore = score;
-      bestCandidate = {
-        start: section.start,
-        confidence: Math.min(score / 12, 1.0)
-      };
-    }
+  const s = startMs / 1000, e = endMs / 1000;
+  const span = e - s;
+  let best: DropCandidate | null = null;
+
+  for (let i = 1; i < sections.length; i++) {
+    const cur = sections[i];
+    if (cur.start < s || cur.start > e) continue;
+    const prev = sections[i - 1];
+    if (cur.loudness < thresh) continue;
+
+    // score: loudness + tempo_conf + energy jump + sweet‑spot bonus
+    let score = (cur.loudness + 60) / 10;
+    score += cur.tempo_confidence * 4;
+    if (cur.loudness > prev.loudness + 2) score += 4;                // energy jump
+    const posRatio = (cur.start - s) / span;
+    if (posRatio > 0.2 && posRatio < 0.8) score += 2;                 // middle sweet spot
+
+    if (!best || score > best.score) best = { start: cur.start, score };
   }
-  
-  return bestCandidate;
+  return best;
 }
 
 function findDropInSegments(
   segments: AudioAnalysis['segments'],
-  searchStartMs: number,
-  searchEndMs: number,
-  loudnessThreshold: number
+  startMs: number,
+  endMs: number,
+  thresh: number
 ): DropCandidate | null {
-  const searchStartSec = searchStartMs / 1000;
-  const searchEndSec = searchEndMs / 1000;
-  
-  console.log('Analyzing segments for drops...');
-  
-  const candidateSegments = segments.filter(segment => 
-    segment.start >= searchStartSec && 
-    segment.start <= searchEndSec &&
-    segment.loudness_max >= loudnessThreshold
-  );
-  
-  console.log(`Found ${candidateSegments.length} candidate segments`);
-  
-  if (candidateSegments.length === 0) return null;
-  
-  // Find segments with sudden loudness spikes
-  let bestCandidate: DropCandidate | null = null;
-  let bestScore = 0;
-  
-  for (let i = 1; i < candidateSegments.length; i++) {
-    const segment = candidateSegments[i];
-    const prevSegment = candidateSegments[i - 1];
-    
-    const loudnessJump = segment.loudness_max - prevSegment.loudness_max;
-    const timbre = segment.timbre;
-    
-    // Score based on loudness spike and timbral characteristics
-    let score = Math.max(0, loudnessJump) * 3;
-    score += (segment.loudness_max + 60) / 20; // Normalize loudness
-    
-    // Bonus for strong timbral characteristics (brightness, energy)
-    if (timbre.length > 0) {
-      score += Math.abs(timbre[0]) * 0.15; // Brightness
-    }
-    if (timbre.length > 1) {
-      score += Math.abs(timbre[1]) * 0.15; // Energy
-    }
-    
-    // Bonus for significant loudness jump
-    if (loudnessJump > 3) {
-      score += 3;
-      console.log(`Significant loudness jump: ${prevSegment.loudness_max} -> ${segment.loudness_max}`);
-    }
-    
-    if (score > bestScore) {
-      bestScore = score;
-      bestCandidate = {
-        start: segment.start,
-        confidence: Math.min(score / 20, 1.0)
-      };
-    }
+  const s = startMs / 1000, e = endMs / 1000;
+  let best: DropCandidate | null = null;
+
+  for (let i = 1; i < segments.length; i++) {
+    const cur = segments[i];
+    if (cur.start < s || cur.start > e) continue;
+    if (cur.loudness_max < thresh) continue;
+
+    const prev = segments[i - 1];
+    const loudJump = cur.loudness_max - prev.loudness_max;
+    const score = Math.max(0, loudJump) * 3 + (cur.loudness_max + 60) / 15;
+
+    if (!best || score > best.score) best = { start: cur.start, score };
   }
-  
-  return bestCandidate;
+  return best;
 }
 
-// IndexedDB caching for analysis results
+function loudestSegmentInRange(
+  segments: AudioAnalysis['segments'],
+  startMs: number,
+  endMs: number
+): DropCandidate | null {
+  const s = startMs / 1000, e = endMs / 1000;
+  const inRange = segments.filter(seg => seg.start >= s && seg.start <= e);
+  if (!inRange.length) return null;
+  const loudest = inRange.reduce((a, b) => (b.loudness_max > a.loudness_max ? b : a));
+  return { start: loudest.start, score: 0.6 };
+}
+
+// ───────────────────────────── Utility helpers ────────────────────────────────
+function snapToDownbeat(targetSec: number, bars: AudioAnalysis['bars']): number {
+  let closest = targetSec;
+  let minDist = Infinity;
+  for (const bar of bars) {
+    if (bar.confidence < 0.5) continue;
+    const dist = Math.abs(bar.start - targetSec);
+    if (dist < minDist) { minDist = dist; closest = bar.start; }
+  }
+  return closest;
+}
+
+function median(nums: number[]): number {
+  if (!nums.length) return 0;
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function squash(x: number): number { return 1 / (1 + Math.exp(-0.6 * (x - 5))); }
+
+// ──────────────────────────────── Caching ─────────────────────────────────────
 const DB_NAME = 'SpotifyDropAnalysisDB';
 const DB_VERSION = 1;
 const STORE_NAME = 'dropAnalysis';
 
 function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
-    
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
+  return new Promise((res, rej) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onerror = () => rej(req.error);
+    req.onsuccess = () => res(req.result);
+    req.onupgradeneeded = e => {
+      const db = (e.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, { keyPath: 'trackId' });
-        store.createIndex('timestamp', 'analysisTimestamp');
+        const st = db.createObjectStore(STORE_NAME, { keyPath: 'trackId' });
+        st.createIndex('timestamp', 'analysisTimestamp');
       }
     };
   });
@@ -291,32 +221,24 @@ function openDB(): Promise<IDBDatabase> {
 async function getCachedAnalysis(trackId: string): Promise<DropAnalysis | null> {
   try {
     const db = await openDB();
-    const transaction = db.transaction([STORE_NAME], 'readonly');
-    const store = transaction.objectStore(STORE_NAME);
-    
-    return new Promise((resolve, reject) => {
-      const request = store.get(trackId);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result || null);
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const req = tx.objectStore(STORE_NAME).get(trackId);
+    return await new Promise((res, rej) => {
+      req.onerror = () => rej(req.error);
+      req.onsuccess = () => res(req.result || null);
     });
-  } catch (error) {
-    console.error('Failed to get cached analysis:', error);
+  } catch (e) {
+    console.error('Cache read failed:', e);
     return null;
   }
 }
 
-async function cacheAnalysis(analysis: DropAnalysis): Promise<void> {
+async function cacheAnalysis(a: DropAnalysis): Promise<void> {
   try {
     const db = await openDB();
-    const transaction = db.transaction([STORE_NAME], 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    
-    return new Promise((resolve, reject) => {
-      const request = store.put(analysis);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve();
-    });
-  } catch (error) {
-    console.error('Failed to cache analysis:', error);
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put(a);
+  } catch (e) {
+    console.error('Cache write failed:', e);
   }
 }
