@@ -6,7 +6,7 @@ A production-ready web application that intelligently "power-skims" Spotify play
 
 - **🔐 Spotify Authentication**: Secure OAuth2 PKCE flow integration
 - **🎯 Smart Drop Detection**: Advanced audio analysis using Spotify's Audio Analysis API
-- **▶️ YouTube Playback**: Seamless playback using YouTube IFrame Player API
+- **▶️ YouTube Playback**: Seamless playback using YouTube Data API v3 and YouTube IFrame Player API
 - **⚡ Auto-Skip**: Customizable preview lengths with automatic track progression
 - **💾 Intelligent Caching**: IndexedDB storage for analysis results to avoid re-processing
 - **🎚️ Adjustable Settings**: Fine-tune loudness thresholds and preview durations
@@ -68,7 +68,7 @@ The app uses a sophisticated multi-layered approach to find the perfect "drop" m
 
 ### Playback Strategy
 
-- Primary: YouTube IFrame Player API for universal compatibility
+- Primary: YouTube Data API v3, YouTube IFrame Player API
 - Fallback: Spotify Web Playback SDK for premium users (when available)
 - Automatic video search using artist and track name
 
@@ -90,7 +90,7 @@ The app uses a sophisticated multi-layered approach to find the perfect "drop" m
 
 ### APIs & Services
 - **Spotify Web API** for playlist and audio analysis data
-- **YouTube IFrame Player API** for audio playback
+- **YouTube Data API v3 + YouTube IFrame Player API** for audio playback
 - **IndexedDB** for local caching
 
 ### Key Components
