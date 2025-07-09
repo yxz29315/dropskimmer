@@ -57,28 +57,7 @@ export function usePlayer() {
     }
   }, []);
 
-  const nextTrack = useCallback(() => {
-    console.log('Moving to next track');
-    const nextIndex = playerState.currentTrackIndex + 1;
-    if (nextIndex < playerState.queue.length) {
-      const nextTrack = playerState.queue[nextIndex];
-      playTrack(nextTrack, nextIndex);
-    } else {
-      // End of queue
-      console.log('End of queue reached');
-      setPlayerState(prev => ({
-        ...prev,
-        isPlaying: false,
-        progress: 0,
-      }));
-      stopProgressTracking();
-      if (previewTimeout.current) {
-        clearTimeout(previewTimeout.current);
-        previewTimeout.current = null;
-      }
-    }
-  }, [playerState.currentTrackIndex, playerState.queue, stopProgressTracking]);
-
+  // Define startProgressTracking before playTrack
   const startProgressTracking = useCallback((dropStart: number) => {
     stopProgressTracking();
     console.log('Starting progress tracking from drop start:', dropStart);
@@ -107,9 +86,10 @@ export function usePlayer() {
         // console.log('[ProgressTracking] Not playing or player not ready');
       }
     }, 500);
-  }, [youtubePlayer, playerState.previewLength, nextTrack, stopProgressTracking]);
+  }, [youtubePlayer, playerState.previewLength, stopProgressTracking]);
 
-  const playTrack = useCallback(async (track: SpotifyTrack, index: number) => {
+  // Now define playTrack after startProgressTracking
+  const playTrack = useCallback(async (track: SpotifyTrack, index: number): Promise<void> => {
     try {
       console.log('=== Playing track ===');
       console.log('Track:', track.name, 'by', track.artists[0]?.name);
@@ -190,7 +170,34 @@ export function usePlayer() {
       // Try next track after a short delay
       setTimeout(() => nextTrack(), 2000);
     }
-  }, [playerState.previewLength, youtubePlayer, isYouTubeReady, nextTrack, startProgressTracking]);
+  }, [playerState.previewLength, youtubePlayer, isYouTubeReady, startProgressTracking]);
+
+  // Now define nextTrack after playTrack
+  const nextTrack: () => void = useCallback(() => {
+    setPlayerState(prev => {
+      const nextIndex = prev.currentTrackIndex + 1;
+      if (nextIndex < prev.queue.length) {
+        const nextTrack = prev.queue[nextIndex];
+        playTrack(nextTrack, nextIndex);
+        return {
+          ...prev,
+        };
+      } else {
+        // End of queue
+        console.log('End of queue reached');
+        stopProgressTracking();
+        if (previewTimeout.current) {
+          clearTimeout(previewTimeout.current);
+          previewTimeout.current = null;
+        }
+        return {
+          ...prev,
+          isPlaying: false,
+          progress: 0,
+        };
+      }
+    });
+  }, [playTrack, stopProgressTracking]);
 
   const handlePlayerStateChange = useCallback((event: any) => {
     const state = event.data;
